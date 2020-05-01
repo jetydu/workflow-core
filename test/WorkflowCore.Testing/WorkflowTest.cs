@@ -18,7 +18,7 @@ namespace WorkflowCore.Testing
         protected IWorkflowHost Host;
         protected IPersistenceProvider PersistenceProvider;
         protected List<StepError> UnhandledStepErrors = new List<StepError>();
-
+        
         protected virtual void Setup()
         {
             //setup dependency injection
@@ -39,7 +39,7 @@ namespace WorkflowCore.Testing
             Host.Start();
         }
 
-        private void Host_OnStepError(WorkflowInstance workflow, WorkflowStep step, Exception exception)
+        protected void Host_OnStepError(WorkflowInstance workflow, WorkflowStep step, Exception exception)
         {
             UnhandledStepErrors.Add(new StepError()
             {
@@ -75,7 +75,7 @@ namespace WorkflowCore.Testing
 
         protected IEnumerable<EventSubscription> GetActiveSubscriptons(string eventName, string eventKey)
         {
-            return PersistenceProvider.GetSubcriptions(eventName, eventKey, DateTime.MaxValue).Result;
+            return PersistenceProvider.GetSubscriptions(eventName, eventKey, DateTime.MaxValue).Result;
         }
 
         protected void WaitForEventSubscription(string eventName, string eventKey, TimeSpan timeOut)

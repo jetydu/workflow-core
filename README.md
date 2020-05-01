@@ -2,11 +2,18 @@
 
 [![Build status](https://ci.appveyor.com/api/projects/status/xnby6p5v4ur04u76?svg=true)](https://ci.appveyor.com/project/danielgerlag/workflow-core)
 
-Workflow Core is a light weight workflow engine targeting .NET Standard.  Think: long running processes with multiple tasks that need to track state.  It supports pluggable persistence and concurrency providers to allow for multi-node clusters.
+Workflow Core is a light weight embeddable workflow engine targeting .NET Standard.  Think: long running processes with multiple tasks that need to track state.  It supports pluggable persistence and concurrency providers to allow for multi-node clusters.
+
+### Announcements
+
+#### New related project: Conductor
+Conductor is a stand-alone workflow server as opposed to a library that uses Workflow Core internally. It exposes an API that allows you to store workflow definitions, track running workflows, manage events and define custom steps and scripts for usage in your workflows.
+
+https://github.com/danielgerlag/conductor
 
 ## Documentation
 
-See [Tutorial here.](https://github.com/danielgerlag/workflow-core/wiki)
+See [Tutorial here.](https://workflow-core.readthedocs.io)
 
 ## Fluent API
 
@@ -20,14 +27,14 @@ public class MyWorkflow : IWorkflow
         builder
            .StartWith<Task1>()
            .Then<Task2>()
-           .Then<Task3>;
+           .Then<Task3>();
     }
 }
 ```
 
-## JSON Workflow Definitions
+## JSON / YAML Workflow Definitions
 
-Define your workflows in JSON
+Define your workflows in JSON or YAML
 
 ```json
 {
@@ -45,6 +52,17 @@ Define your workflows in JSON
     }
   ]
 }
+```
+
+```yaml
+Id: HelloWorld
+Version: 1
+Steps:
+- Id: Hello
+  StepType: MyApp.HelloWorld, MyApp
+  NextStepId: Bye
+- Id: Bye
+  StepType: MyApp.GoodbyeWorld, MyApp
 ```
 
 ### Sample use cases
@@ -66,7 +84,7 @@ public class MyWorkflow : IWorkflow
             .StartWith<CreateUser>()
                 .Input(step => step.Email, data => data.Email)
                 .Input(step => step.Password, data => data.Password)
-                .Output(data => data.UserId, step => step.UserId);
+                .Output(data => data.UserId, step => step.UserId)
            .Then<SendConfirmationEmail>()
                .WaitFor("confirmation", data => data.UserId)
            .Then<UpdateUser>()
@@ -118,7 +136,8 @@ There are several persistence providers available as separate Nuget packages.
 * [SQL Server](src/providers/WorkflowCore.Persistence.SqlServer)
 * [PostgreSQL](src/providers/WorkflowCore.Persistence.PostgreSQL)
 * [Sqlite](src/providers/WorkflowCore.Persistence.Sqlite)
-* Redis *(coming soon...)*
+* [MySQL](src/providers/WorkflowCore.Persistence.MySQL)
+* [Redis](src/providers/WorkflowCore.Providers.Redis)
 
 ## Search
 
@@ -129,7 +148,6 @@ These are also available as separate Nuget packages.
 ## Extensions
 
 * [User (human) workflows](src/extensions/WorkflowCore.Users)
-* [HTTP wrapper for Workflow Host Service](src/extensions/WorkflowCore.WebAPI)
 
 
 ## Samples
@@ -148,6 +166,8 @@ These are also available as separate Nuget packages.
 
 * [Events](src/samples/WorkflowCore.Sample04)
 
+* [Activity Workers](src/samples/WorkflowCore.Sample18)
+
 * [Parallel Tasks](src/samples/WorkflowCore.Sample13)
 
 * [Saga Transactions (with compensation)](src/samples/WorkflowCore.Sample17)
@@ -162,7 +182,7 @@ These are also available as separate Nuget packages.
 
 * [Looping](src/samples/WorkflowCore.Sample02)
 
-* [Exposing a REST API](src/samples/WorkflowCore.Sample07)
+* [Exposing a REST API](src/samples/WebApiSample)
 
 * [Human(User) Workflow](src/samples/WorkflowCore.Sample08)
 
@@ -173,14 +193,18 @@ These are also available as separate Nuget packages.
 
 * **Daniel Gerlag** - *Initial work*
 * **Jackie Ja**
-* **Aaron Scribnor**
+* **Aaron Scribner**
 * **Roberto Paterlini**
+
+## Related Projects
+
+* [Conductor](https://github.com/danielgerlag/conductor) (Stand-alone workflow server built on Workflow Core)
 
 ## Ports
 
 * [JWorkflow (Java)](https://github.com/danielgerlag/jworkflow)
 * [workflow-es (Node.js)](https://github.com/danielgerlag/workflow-es)
-* [workflow_rb (Ruby)](https://github.com/danielgerlag/workflow_rb)
+* [liteflow (Python)](https://github.com/danielgerlag/liteflow)
 
 ## License
 

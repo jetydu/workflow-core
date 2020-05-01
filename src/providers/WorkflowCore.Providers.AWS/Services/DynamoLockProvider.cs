@@ -13,7 +13,7 @@ namespace WorkflowCore.Providers.AWS.Services
     public class DynamoLockProvider : IDistributedLockProvider
     {
         private readonly ILogger _logger;
-        private readonly AmazonDynamoDBClient _client;
+        private readonly IAmazonDynamoDB _client;
         private readonly string _tableName;
         private readonly string _nodeId;    
         private readonly long _ttl = 30000;
@@ -77,16 +77,14 @@ namespace WorkflowCore.Providers.AWS.Services
 
         public async Task ReleaseLock(string Id)
         {
-            if (_mutex.WaitOne())
+            _mutex.WaitOne();
+            try
             {
-                try
-                {
-                    _localLocks.Remove(Id);
-                }
-                finally
-                {
-                    _mutex.Set();
-                }
+                _localLocks.Remove(Id);
+            }
+            finally
+            {
+                _mutex.Set();
             }
             
             try

@@ -25,6 +25,7 @@ namespace WorkflowCore.UnitTests.Services
         protected ILifeCycleEventPublisher EventHub;
         protected ICancellationProcessor CancellationProcessor;
         protected IServiceProvider ServiceProvider;
+        protected IScopeProvider ScopeProvider;
         protected IDateTimeProvider DateTimeProvider;
         protected WorkflowOptions Options;
 
@@ -33,6 +34,7 @@ namespace WorkflowCore.UnitTests.Services
             Host = A.Fake<IWorkflowHost>();
             PersistenceProvider = A.Fake<IPersistenceProvider>();
             ServiceProvider = A.Fake<IServiceProvider>();
+            ScopeProvider = A.Fake<IScopeProvider>();
             Registry = A.Fake<IWorkflowRegistry>();
             ResultProcesser = A.Fake<IExecutionResultProcessor>();
             EventHub = A.Fake<ILifeCycleEventPublisher>();
@@ -41,13 +43,18 @@ namespace WorkflowCore.UnitTests.Services
 
             Options = new WorkflowOptions(A.Fake<IServiceCollection>());
 
+            var scope = A.Fake<IServiceScope>();
+            A.CallTo(() => ScopeProvider.CreateScope()).Returns(scope);
+            A.CallTo(() => scope.ServiceProvider).Returns(ServiceProvider);
+
             A.CallTo(() => DateTimeProvider.Now).Returns(DateTime.Now);
+            A.CallTo(() => DateTimeProvider.UtcNow).Returns(DateTime.UtcNow);
 
             //config logging
             var loggerFactory = new LoggerFactory();
-            loggerFactory.AddConsole(LogLevel.Debug);            
+            //loggerFactory.AddConsole(LogLevel.Debug);            
 
-            Subject = new WorkflowExecutor(Registry, ServiceProvider, DateTimeProvider, ResultProcesser, EventHub, CancellationProcessor, Options, loggerFactory);
+            Subject = new WorkflowExecutor(Registry, ServiceProvider, ScopeProvider, DateTimeProvider, ResultProcesser, EventHub, CancellationProcessor, Options, loggerFactory);
         }
 
         [Fact(DisplayName = "Should execute active step")]
@@ -318,7 +325,7 @@ namespace WorkflowCore.UnitTests.Services
                 Id = id,
                 Version = version,
                 DataType = typeof(object),
-                Steps = new List<WorkflowStep>()
+                Steps = new WorkflowStepCollection()
                 {
                     step1
                 }
@@ -341,7 +348,7 @@ namespace WorkflowCore.UnitTests.Services
             A.CallTo(() => result.ConstructBody(ServiceProvider)).Returns(stepBody);
             A.CallTo(() => result.Inputs).Returns(inputs);
             A.CallTo(() => result.Outputs).Returns(outputs);
-            A.CallTo(() => result.Outcomes).Returns(new List<StepOutcome>());
+            A.CallTo(() => result.Outcomes).Returns(new List<IStepOutcome>());
             A.CallTo(() => result.InitForExecution(A<WorkflowExecutorResult>.Ignored, A<WorkflowDefinition>.Ignored, A<WorkflowInstance>.Ignored, A<ExecutionPointer>.Ignored)).Returns(ExecutionPipelineDirective.Next);
             A.CallTo(() => result.BeforeExecute(A<WorkflowExecutorResult>.Ignored, A<IStepExecutionContext>.Ignored, A<ExecutionPointer>.Ignored, A<IStepBody>.Ignored)).Returns(ExecutionPipelineDirective.Next);
             return result;

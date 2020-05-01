@@ -1,7 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Threading.Tasks.Dataflow;
 using Microsoft.Extensions.Logging;
 using WorkflowCore.Interface;
 using WorkflowCore.Models;
@@ -12,6 +13,7 @@ namespace WorkflowCore.Services.BackgroundTasks
     {
         protected abstract QueueType Queue { get; }
         protected virtual int MaxConcurrentItems => Math.Max(Environment.ProcessorCount, 2);
+        protected virtual bool EnableSecondPasses => false;
 
         protected readonly IQueueProvider QueueProvider;
         protected readonly ILogger Logger;
@@ -37,7 +39,7 @@ namespace WorkflowCore.Services.BackgroundTasks
 
             _cancellationTokenSource = new CancellationTokenSource();
                         
-            DispatchTask = new Task(Execute);
+            DispatchTask = new Task(Execute, TaskCreationOptions.LongRunning);
             DispatchTask.Start();
         }
 
@@ -51,20 +53,16 @@ namespace WorkflowCore.Services.BackgroundTasks
         private async void Execute()
         {
             var cancelToken = _cancellationTokenSource.Token;
-            var opts = new ExecutionDataflowBlockOptions()
-            {
-                MaxDegreeOfParallelism = MaxConcurrentItems,
-                BoundedCapacity = MaxConcurrentItems + 1
-            };
-
-            var actionBlock = new ActionBlock<string>(ExecuteItem, opts);
+            var activeTasks = new Dictionary<string, Task>();
+            var secondPasses = new HashSet<string>();
 
             while (!cancelToken.IsCancellationRequested)
             {
                 try
                 {
-                    if (!SpinWait.SpinUntil(() => actionBlock.InputCount == 0, Options.IdleTime))
+                    if (activeTasks.Count >= MaxConcurrentItems)
                     {
+                        await Task.Delay(Options.IdleTime);
                         continue;
                     }
 
@@ -76,23 +74,54 @@ namespace WorkflowCore.Services.BackgroundTasks
                             await Task.Delay(Options.IdleTime, cancelToken);
                         continue;
                     }
-
-                    if (!actionBlock.Post(item))
+                    
+                    if (activeTasks.ContainsKey(item))
                     {
-                        await QueueProvider.QueueWork(item, Queue);
+                        secondPasses.Add(item);
+                        if (!EnableSecondPasses)
+                            await QueueProvider.QueueWork(item, Queue);
+                        continue;
                     }
+
+                    secondPasses.Remove(item);
+
+                    var task = new Task(async (object data) =>
+                    {
+                        try
+                        {
+                            await ExecuteItem((string)data);
+                            while (EnableSecondPasses && secondPasses.Contains(item))
+                            {
+                                secondPasses.Remove(item);
+                                await ExecuteItem((string)data);
+                            }
+                        }
+                        finally
+                        {
+                            lock (activeTasks)
+                            {
+                                activeTasks.Remove((string)data);
+                            }
+                        }
+                    }, item);
+                    lock (activeTasks)
+                    {
+                        activeTasks.Add(item, task);
+                    }
+                    
+                    task.Start();
                 }
                 catch (OperationCanceledException)
                 {
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError(ex.Message);
+                    Logger.LogError(ex, ex.Message);
                 }
             }
 
-            actionBlock.Complete();
-            await actionBlock.Completion;
+            foreach (var task in activeTasks.Values)
+                task.Wait();
         }
 
         private async Task ExecuteItem(string itemId)
@@ -107,7 +136,7 @@ namespace WorkflowCore.Services.BackgroundTasks
             }
             catch (Exception ex)
             {
-                Logger.LogError($"Error executing item {itemId} - {ex.Message}");
+                Logger.LogError(default(EventId), ex, $"Error executing item {itemId} - {ex.Message}");
             }
         }
     }

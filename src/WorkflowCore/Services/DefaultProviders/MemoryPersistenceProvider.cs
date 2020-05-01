@@ -8,33 +8,21 @@ using WorkflowCore.Models;
 
 namespace WorkflowCore.Services
 {
-    #pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
+
+    public interface ISingletonMemoryProvider : IPersistenceProvider
+    {
+    }
+#pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
 
     /// <summary>
     /// In-memory implementation of IPersistenceProvider for demo and testing purposes
     /// </summary>
-    public class MemoryPersistenceProvider : IPersistenceProvider
+    public class MemoryPersistenceProvider : ISingletonMemoryProvider
     {
-        private static readonly ConcurrentDictionary<string, Tuple<List<WorkflowInstance>, List<EventSubscription>, List<Event>, List<ExecutionError>>> Environments = 
-                            new ConcurrentDictionary<string, Tuple<List<WorkflowInstance>, List<EventSubscription>, List<Event>, List<ExecutionError>>>();
-        private readonly List<WorkflowInstance> _instances;
-        private readonly List<EventSubscription> _subscriptions;
-        private readonly List<Event> _events;
-        private readonly List<ExecutionError> _errors;
-
-        public MemoryPersistenceProvider()
-            : this("")
-        {
-        }
-
-        public MemoryPersistenceProvider(string environmentKey)
-        {
-            var environment = Environments.GetOrAdd(environmentKey, _ => Tuple.Create(new List<WorkflowInstance>(), new List<EventSubscription>(), new List<Event>(), new List<ExecutionError>()));
-            _instances = environment.Item1;
-            _subscriptions = environment.Item2;
-            _events = environment.Item3;
-            _errors = environment.Item4;
-        }
+        private readonly List<WorkflowInstance> _instances = new List<WorkflowInstance>();
+        private readonly List<EventSubscription> _subscriptions = new List<EventSubscription>();
+        private readonly List<Event> _events = new List<Event>();
+        private readonly List<ExecutionError> _errors = new List<ExecutionError>();
 
         public async Task<string> CreateNewWorkflow(WorkflowInstance workflow)
         {
@@ -70,6 +58,19 @@ namespace WorkflowCore.Services
             lock (_instances)
             {
                 return _instances.First(x => x.Id == Id);
+            }
+        }
+
+        public async Task<IEnumerable<WorkflowInstance>> GetWorkflowInstances(IEnumerable<string> ids)
+        {
+            if (ids == null)
+            {
+                return new List<WorkflowInstance>();
+            }
+
+            lock (_instances)
+            {
+                return _instances.Where(x => ids.Contains(x.Id));
             }
         }
 
@@ -114,7 +115,7 @@ namespace WorkflowCore.Services
             }
         }
 
-        public async Task<IEnumerable<EventSubscription>> GetSubcriptions(string eventName, string eventKey, DateTime asOf)
+        public async Task<IEnumerable<EventSubscription>> GetSubscriptions(string eventName, string eventKey, DateTime asOf)
         {
             lock (_subscriptions)
             {
@@ -132,8 +133,55 @@ namespace WorkflowCore.Services
             }
         }
 
+        public Task<EventSubscription> GetSubscription(string eventSubscriptionId)
+        {
+            lock (_subscriptions)
+            {
+                var sub = _subscriptions.Single(x => x.Id == eventSubscriptionId);
+                return Task.FromResult(sub);
+            }
+        }
+
+        public Task<EventSubscription> GetFirstOpenSubscription(string eventName, string eventKey, DateTime asOf)
+        {
+            lock (_subscriptions)
+            {
+                var result =  _subscriptions
+                    .FirstOrDefault(x => x.ExternalToken == null &&  x.EventName == eventName && x.EventKey == eventKey && x.SubscribeAsOf <= asOf);
+                return Task.FromResult(result);
+            }
+        }
+
+        public Task<bool> SetSubscriptionToken(string eventSubscriptionId, string token, string workerId, DateTime expiry)
+        {
+            lock (_subscriptions)
+            {
+                var sub = _subscriptions.Single(x => x.Id == eventSubscriptionId);
+                sub.ExternalToken = token;
+                sub.ExternalWorkerId = workerId;
+                sub.ExternalTokenExpiry = expiry;
+                
+                return Task.FromResult(true);
+            }
+        }
+
+        public Task ClearSubscriptionToken(string eventSubscriptionId, string token)
+        {
+            lock (_subscriptions)
+            {
+                var sub = _subscriptions.Single(x => x.Id == eventSubscriptionId);
+                if (sub.ExternalToken != token)
+                    throw new InvalidOperationException();
+                sub.ExternalToken = null;
+                sub.ExternalWorkerId = null;
+                sub.ExternalTokenExpiry = null;
+
+                return Task.CompletedTask;
+            }
+        }
+
         public void EnsureStoreExists()
-        {            
+        {
         }
 
         public async Task<string> CreateEvent(Event newEvent)
@@ -145,7 +193,7 @@ namespace WorkflowCore.Services
                 return newEvent.Id;
             }
         }
-        
+
         public async Task MarkEventProcessed(string id)
         {
             lock (_events)
@@ -209,5 +257,5 @@ namespace WorkflowCore.Services
         }
     }
 
-    #pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously
+#pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously
 }

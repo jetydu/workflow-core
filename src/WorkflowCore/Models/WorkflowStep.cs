@@ -14,11 +14,11 @@ namespace WorkflowCore.Models
 
         public virtual string Name { get; set; }
 
-        public virtual string Tag { get; set; }
+        public virtual string ExternalId { get; set; }
 
         public virtual List<int> Children { get; set; } = new List<int>();
 
-        public virtual List<StepOutcome> Outcomes { get; set; } = new List<StepOutcome>();
+        public virtual List<IStepOutcome> Outcomes { get; set; } = new List<IStepOutcome>();
 
         public virtual List<IStepParameter> Inputs { get; set; } = new List<IStepParameter>();
 

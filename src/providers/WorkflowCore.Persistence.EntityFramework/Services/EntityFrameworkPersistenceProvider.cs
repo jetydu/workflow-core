@@ -26,7 +26,7 @@ namespace WorkflowCore.Persistence.EntityFramework.Services
             _canCreateDB = canCreateDB;
             _canMigrateDB = canMigrateDB;
         }
-        
+
         public async Task<string> CreateEventSubscription(EventSubscription subscription)
         {
             using (var db = ConstructDbContext())
@@ -96,7 +96,7 @@ namespace WorkflowCore.Persistence.EntityFramework.Services
                 return result;
             }
         }
-        
+
         public async Task<WorkflowInstance> GetWorkflowInstance(string Id)
         {
             using (var db = ConstructDbContext())
@@ -112,6 +112,26 @@ namespace WorkflowCore.Persistence.EntityFramework.Services
                     return null;
 
                 return raw.ToWorkflowInstance();
+            }
+        }
+
+        public async Task<IEnumerable<WorkflowInstance>> GetWorkflowInstances(IEnumerable<string> ids)
+        {
+            if (ids == null)
+            {
+                return new List<WorkflowInstance>();
+            }
+
+            using (var db = ConstructDbContext())
+            {
+                var uids = ids.Select(i => new Guid(i));
+                var raw = db.Set<PersistedWorkflow>()
+                    .Include(wf => wf.ExecutionPointers)
+                    .ThenInclude(ep => ep.ExtensionAttributes)
+                    .Include(wf => wf.ExecutionPointers)
+                    .Where(x => uids.Contains(x.InstanceId));
+
+                return (await raw.ToListAsync()).Select(i => i.ToWorkflowInstance());
             }
         }
 
@@ -143,7 +163,7 @@ namespace WorkflowCore.Persistence.EntityFramework.Services
                 await db.SaveChangesAsync();
             }
         }
-                
+
         public virtual void EnsureStoreExists()
         {
             using (var context = ConstructDbContext())
@@ -162,7 +182,7 @@ namespace WorkflowCore.Persistence.EntityFramework.Services
             }
         }
 
-        public async Task<IEnumerable<EventSubscription>> GetSubcriptions(string eventName, string eventKey, DateTime asOf)
+        public async Task<IEnumerable<EventSubscription>> GetSubscriptions(string eventName, string eventKey, DateTime asOf)
         {
             using (var db = ConstructDbContext())
             {
@@ -283,11 +303,70 @@ namespace WorkflowCore.Persistence.EntityFramework.Services
                 }
             }
         }
-        
+
         private WorkflowDbContext ConstructDbContext()
         {
             return _contextFactory.Build();
         }
 
+        public async Task<EventSubscription> GetSubscription(string eventSubscriptionId)
+        {
+            using (var db = ConstructDbContext())
+            {
+                var uid = new Guid(eventSubscriptionId);
+                var raw = await db.Set<PersistedSubscription>().FirstOrDefaultAsync(x => x.SubscriptionId == uid);
+
+                return raw?.ToEventSubscription();
+            }
+        }
+
+        public async Task<EventSubscription> GetFirstOpenSubscription(string eventName, string eventKey, DateTime asOf)
+        {
+            using (var db = ConstructDbContext())
+            {
+                var raw = await db.Set<PersistedSubscription>().FirstOrDefaultAsync(x => x.EventName == eventName && x.EventKey == eventKey && x.SubscribeAsOf <= asOf && x.ExternalToken == null);
+
+                return raw?.ToEventSubscription();
+            }
+        }
+
+        public async Task<bool> SetSubscriptionToken(string eventSubscriptionId, string token, string workerId, DateTime expiry)
+        {
+            using (var db = ConstructDbContext())
+            {
+                var uid = new Guid(eventSubscriptionId);
+                var existingEntity = await db.Set<PersistedSubscription>()
+                    .Where(x => x.SubscriptionId == uid)
+                    .AsTracking()
+                    .FirstAsync();
+
+                existingEntity.ExternalToken = token;
+                existingEntity.ExternalWorkerId = workerId;
+                existingEntity.ExternalTokenExpiry = expiry;
+                await db.SaveChangesAsync();
+
+                return true;
+            }
+        }
+
+        public async Task ClearSubscriptionToken(string eventSubscriptionId, string token)
+        {
+            using (var db = ConstructDbContext())
+            {
+                var uid = new Guid(eventSubscriptionId);
+                var existingEntity = await db.Set<PersistedSubscription>()
+                    .Where(x => x.SubscriptionId == uid)
+                    .AsTracking()
+                    .FirstAsync();
+                
+                if (existingEntity.ExternalToken != token)
+                    throw new InvalidOperationException();
+
+                existingEntity.ExternalToken = null;
+                existingEntity.ExternalWorkerId = null;
+                existingEntity.ExternalTokenExpiry = null;
+                await db.SaveChangesAsync();
+            }
+        }
     }
 }

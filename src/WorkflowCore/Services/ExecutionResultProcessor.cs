@@ -33,7 +33,7 @@ namespace WorkflowCore.Services
             pointer.Outcome = result.OutcomeValue;
             if (result.SleepFor.HasValue)
             {
-                pointer.SleepUntil = _datetimeProvider.Now.ToUniversalTime().Add(result.SleepFor.Value);
+                pointer.SleepUntil = _datetimeProvider.UtcNow.Add(result.SleepFor.Value);
                 pointer.Status = PointerStatus.Sleeping;
             }
 
@@ -48,26 +48,28 @@ namespace WorkflowCore.Services
                 {
                     WorkflowId = workflow.Id,
                     StepId = pointer.StepId,
+                    ExecutionPointerId = pointer.Id,
                     EventName = pointer.EventName,
                     EventKey = pointer.EventKey,
-                    SubscribeAsOf = result.EventAsOf
+                    SubscribeAsOf = result.EventAsOf,
+                    SubscriptionData = result.SubscriptionData
                 });
             }
 
             if (result.Proceed)
             {
                 pointer.Active = false;
-                pointer.EndTime = _datetimeProvider.Now.ToUniversalTime();
+                pointer.EndTime = _datetimeProvider.UtcNow;
                 pointer.Status = PointerStatus.Complete;
-
-                foreach (var outcomeTarget in step.Outcomes.Where(x => object.Equals(x.GetValue(workflow.Data), result.OutcomeValue) || x.GetValue(workflow.Data) == null))
+                                
+                foreach (var outcomeTarget in step.Outcomes.Where(x => x.Matches(result, workflow.Data)))
                 {                    
                     workflow.ExecutionPointers.Add(_pointerFactory.BuildNextPointer(def, pointer, outcomeTarget));
                 }
 
                 _eventPublisher.PublishNotification(new StepCompleted()
                 {
-                    EventTimeUtc = _datetimeProvider.Now,
+                    EventTimeUtc = _datetimeProvider.UtcNow,
                     Reference = workflow.Reference,
                     ExecutionPointerId = pointer.Id,
                     StepId = step.Id,
@@ -92,7 +94,7 @@ namespace WorkflowCore.Services
         {
             _eventPublisher.PublishNotification(new WorkflowError()
             {
-                EventTimeUtc = _datetimeProvider.Now,
+                EventTimeUtc = _datetimeProvider.UtcNow,
                 Reference = workflow.Reference,
                 WorkflowInstanceId = workflow.Id,
                 WorkflowDefinitionId = workflow.WorkflowDefinitionId,
@@ -109,9 +111,9 @@ namespace WorkflowCore.Services
             while (queue.Count > 0)
             {
                 var exceptionPointer = queue.Dequeue();
-                var exceptionStep = def.Steps.Find(x => x.Id == exceptionPointer.StepId);
-                var compensatingStepId = FindScopeCompensationStepId(workflow, def, exceptionPointer);
-                var errorOption = (exceptionStep.ErrorBehavior ?? (compensatingStepId.HasValue ? WorkflowErrorHandling.Compensate : def.DefaultErrorBehavior));
+                var exceptionStep = def.Steps.FindById(exceptionPointer.StepId);
+                var shouldCompensate = ShouldCompensate(workflow, def, exceptionPointer);
+                var errorOption = (exceptionStep.ErrorBehavior ?? (shouldCompensate ? WorkflowErrorHandling.Compensate : def.DefaultErrorBehavior));
 
                 foreach (var handler in _errorHandlers.Where(x => x.Type == errorOption))
                 {
@@ -120,7 +122,7 @@ namespace WorkflowCore.Services
             }
         }
         
-        private int? FindScopeCompensationStepId(WorkflowInstance workflow, WorkflowDefinition def, ExecutionPointer currentPointer)
+        private bool ShouldCompensate(WorkflowInstance workflow, WorkflowDefinition def, ExecutionPointer currentPointer)
         {
             var scope = new Stack<string>(currentPointer.Scope);
             scope.Push(currentPointer.Id);
@@ -129,12 +131,12 @@ namespace WorkflowCore.Services
             {
                 var pointerId = scope.Pop();
                 var pointer = workflow.ExecutionPointers.FindById(pointerId);
-                var step = def.Steps.First(x => x.Id == pointer.StepId);
-                if (step.CompensationStepId.HasValue)
-                    return step.CompensationStepId.Value;
+                var step = def.Steps.FindById(pointer.StepId);
+                if ((step.CompensationStepId.HasValue) || (step.RevertChildrenAfterCompensation))
+                    return true;
             }
 
-            return null;
+            return false;
         }
     }
 }
